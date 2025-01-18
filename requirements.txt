@@ -1,9 +1,9 @@
-langchain==0.0.234
-openai==0.27.8
-chromadb==0.3.29
-pypdf==3.12.2
-streamlit
-tiktoken
+tiktoken==0.3.3 --only-binary :all:
+Pillow==9.5.0 --only-binary :all:
+langchain
+openai
 pytesseract
-Pillow
 python-docx
+streamlit
+PyPDF2
+chardet
