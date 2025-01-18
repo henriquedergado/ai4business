@@ -32,26 +32,28 @@ select_chain_type = st.radio("Chain type", ['stuff', 'map_reduce', "refine", "ma
 
 # Função para carregar documentos
 def load_document(file_path, file_type):
-    if file_type == 'application/pdf':
-        loader = PyPDFLoader(file_path)
-        return loader.load()
-    elif file_type == 'text/plain':
-        loader = TextLoader(file_path)
-        return loader.load()
-    elif file_type == 'text/csv':
-        df = pd.read_csv(file_path)
-        return [{"page_content": df.to_string()}]
-    elif file_type == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
-        doc = docx.Document(file_path)
-        full_text = []
-        for para in doc.paragraphs:
-            full_text.append(para.text)
-        return [{"page_content": "\n".join(full_text)}]
-    elif file_type in ['image/jpeg', 'image/png']:
-        text = pytesseract.image_to_string(Image.open(file_path))
-        return [{"page_content": text}]
-    else:
-        st.error("Unsupported file type.")
+    try:
+        if file_type == 'application/pdf':
+            loader = PyPDFLoader(file_path)
+            return loader.load()
+        elif file_type == 'text/plain':
+            loader = TextLoader(file_path)
+            return loader.load()
+        elif file_type == 'text/csv':
+            df = pd.read_csv(file_path)
+            return [{"page_content": df.to_string()}]
+        elif file_type == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
+            doc = docx.Document(file_path)
+            full_text = [para.text for para in doc.paragraphs]
+            return [{"page_content": "\n".join(full_text)}]
+        elif file_type in ['image/jpeg', 'image/png']:
+            text = pytesseract.image_to_string(Image.open(file_path))
+            return [{"page_content": text}]
+        else:
+            st.error("Unsupported file type.")
+            return None
+    except Exception as e:
+        st.error(f"Error loading document: {e}")
         return None
 
 # Função de perguntas e respostas
@@ -60,28 +62,28 @@ def qa(file_path, file_type, query, chain_type, k):
         documents = load_document(file_path, file_type)
         if not documents:
             return None
-        
-        # split the documents into chunks
+
+        # Dividir documentos em chunks
         text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
         texts = text_splitter.split_documents(documents)
-        
-        # select which embeddings we want to use
+
+        # Selecionar embeddings
         embeddings = OpenAIEmbeddings()
-        
-        # create the vectorestore to use as the index
+
+        # Criar o vetor de armazenamento como índice
         db = Chroma.from_documents(texts, embeddings)
-        
-        # expose this index in a retriever interface
+
+        # Expor o índice em um retriever
         retriever = db.as_retriever(search_type="similarity", search_kwargs={"k": k})
-        
-        # create a chain to answer questions 
-        qa = RetrievalQA.from_chain_type(
-            llm=ChatOpenAI(model="gpt-4"), 
-            chain_type=chain_type, 
-            retriever=retriever, 
+
+        # Criar a cadeia de perguntas e respostas
+        qa_chain = RetrievalQA.from_chain_type(
+            llm=ChatOpenAI(model="gpt-4"),
+            chain_type=chain_type,
+            retriever=retriever,
             return_source_documents=True
         )
-        result = qa({"query": query})
+        result = qa_chain({"query": query})
         return result
     except PdfReadError as e:
         st.error(f"Error reading PDF file: {e}")
@@ -97,9 +99,9 @@ def qa(file_path, file_type, query, chain_type, k):
 def display_result(result):
     if result:
         st.markdown("### Result:")
-        st.write(result["result"])
+        st.write(result.get("result", "No result found."))
         st.markdown("### Relevant source text:")
-        for doc in result["source_documents"]:
+        for doc in result.get("source_documents", []):
             st.markdown("---")
             st.markdown(doc.page_content)
 
@@ -116,7 +118,6 @@ if run_button and file_input and openaikey and prompt:
 
         # Verificar se a chave de API é válida
         try:
-            # Testar a chave de API com uma chamada simples
             embeddings = OpenAIEmbeddings()
             embeddings.embed_documents(["test"])
         except AuthenticationError as e:
