@@ -9,14 +9,14 @@ from langchain.chains import RetrievalQA
 from langchain.chat_models import ChatOpenAI
 from langchain.document_loaders import PyPDFLoader, TextLoader
 from langchain.text_splitter import CharacterTextSplitter
-from langchain.embeddings import OpenAIEmbeddings
-from langchain.vectorstores import Chroma
+from langchain.vectorstores import FAISS
+from sentence_transformers import SentenceTransformer
 from pypdf.errors import PdfReadError
 from openai.error import AuthenticationError, InvalidRequestError
 
 # Adicionar a imagem no cabeçalho
 image_url = "https://cienciadosdados.com/images/CINCIA_DOS_DADOS_4.png"
-st.image(image_url, use_column_width=True)
+st.image(image_url, use_container_width=True)
 
 # Adicionar o nome do aplicativo
 st.subheader("Q&A com IA - PLN usando LangChain")
@@ -32,28 +32,26 @@ select_chain_type = st.radio("Chain type", ['stuff', 'map_reduce', "refine", "ma
 
 # Função para carregar documentos
 def load_document(file_path, file_type):
-    try:
-        if file_type == 'application/pdf':
-            loader = PyPDFLoader(file_path)
-            return loader.load()
-        elif file_type == 'text/plain':
-            loader = TextLoader(file_path)
-            return loader.load()
-        elif file_type == 'text/csv':
-            df = pd.read_csv(file_path)
-            return [{"page_content": df.to_string()}]
-        elif file_type == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
-            doc = docx.Document(file_path)
-            full_text = [para.text for para in doc.paragraphs]
-            return [{"page_content": "\n".join(full_text)}]
-        elif file_type in ['image/jpeg', 'image/png']:
-            text = pytesseract.image_to_string(Image.open(file_path))
-            return [{"page_content": text}]
-        else:
-            st.error("Unsupported file type.")
-            return None
-    except Exception as e:
-        st.error(f"Error loading document: {e}")
+    if file_type == 'application/pdf':
+        loader = PyPDFLoader(file_path)
+        return loader.load()
+    elif file_type == 'text/plain':
+        loader = TextLoader(file_path)
+        return loader.load()
+    elif file_type == 'text/csv':
+        df = pd.read_csv(file_path)
+        return [{"page_content": df.to_string()}]
+    elif file_type == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
+        doc = docx.Document(file_path)
+        full_text = []
+        for para in doc.paragraphs:
+            full_text.append(para.text)
+        return [{"page_content": "\n".join(full_text)}]
+    elif file_type in ['image/jpeg', 'image/png']:
+        text = pytesseract.image_to_string(Image.open(file_path))
+        return [{"page_content": text}]
+    else:
+        st.error("Unsupported file type.")
         return None
 
 # Função de perguntas e respostas
@@ -63,27 +61,28 @@ def qa(file_path, file_type, query, chain_type, k):
         if not documents:
             return None
 
-        # Dividir documentos em chunks
+        # split the documents into chunks
         text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
         texts = text_splitter.split_documents(documents)
 
-        # Selecionar embeddings
-        embeddings = OpenAIEmbeddings()
+        # Use SentenceTransformer for embeddings
+        model = SentenceTransformer('all-MiniLM-L6-v2')
+        embeddings = [model.encode(text["page_content"]) for text in texts]
 
-        # Criar o vetor de armazenamento como índice
-        db = Chroma.from_documents(texts, embeddings)
+        # Create the FAISS index
+        db = FAISS.from_embeddings(embeddings, texts)
 
-        # Expor o índice em um retriever
+        # Expose this index in a retriever interface
         retriever = db.as_retriever(search_type="similarity", search_kwargs={"k": k})
 
-        # Criar a cadeia de perguntas e respostas
-        qa_chain = RetrievalQA.from_chain_type(
-            llm=ChatOpenAI(model="gpt-4"),
-            chain_type=chain_type,
-            retriever=retriever,
+        # Create a chain to answer questions
+        qa = RetrievalQA.from_chain_type(
+            llm=ChatOpenAI(model="gpt-4"), 
+            chain_type=chain_type, 
+            retriever=retriever, 
             return_source_documents=True
         )
-        result = qa_chain({"query": query})
+        result = qa({"query": query})
         return result
     except PdfReadError as e:
         st.error(f"Error reading PDF file: {e}")
@@ -99,9 +98,9 @@ def qa(file_path, file_type, query, chain_type, k):
 def display_result(result):
     if result:
         st.markdown("### Result:")
-        st.write(result.get("result", "No result found."))
+        st.write(result["result"])
         st.markdown("### Relevant source text:")
-        for doc in result.get("source_documents", []):
+        for doc in result["source_documents"]:
             st.markdown("---")
             st.markdown(doc.page_content)
 
@@ -118,8 +117,9 @@ if run_button and file_input and openaikey and prompt:
 
         # Verificar se a chave de API é válida
         try:
-            embeddings = OpenAIEmbeddings()
-            embeddings.embed_documents(["test"])
+            # Testar a chave de API com uma chamada simples
+            model = SentenceTransformer('all-MiniLM-L6-v2')
+            model.encode("test")
         except AuthenticationError as e:
             st.error(f"Invalid OpenAI API Key: {e}")
         else:
