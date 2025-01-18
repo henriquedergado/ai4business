@@ -1,5 +1,5 @@
-tiktoken==0.3.3 --only-binary :all:
-Pillow==9.5.0 --only-binary :all:
+tiktoken>=0.5.2
+Pillow>=9.0.0
 langchain
 openai
 pytesseract
